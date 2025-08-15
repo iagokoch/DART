@@ -1,0 +1,4 @@
+void main() {
+  List<String> listaDePalavra = ["Iago", "Matheus"];
+  print('${listaDePalavra[0]} - ${listaDePalavra[1]}');
+}
