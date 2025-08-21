@@ -1,0 +1,227 @@
+import 'dart:math';
+
+enum ColorStyle { emoji, none }
+
+const colorStyle = ColorStyle.emoji;
+
+String paint(String txt, {required bool isEight, required Suit suit}) {
+  if (colorStyle == ColorStyle.none) return txt;
+  if (isEight) return '🟩$txt';
+  final isRed = suit == Suit.hearts || suit == Suit.diamonds;
+  return isRed ? '🟥$txt' : '⬜$txt';
+}
+
+enum Suit { spades, hearts, diamonds, clubs }
+
+String suitSymbol(Suit s) => {
+  Suit.spades: '♠',
+  Suit.hearts: '♥',
+  Suit.diamonds: '♦',
+  Suit.clubs: '♣',
+}[s]!;
+
+class Card {
+  final String rank;
+  final Suit suit;
+  Card(this.rank, this.suit);
+
+  bool get isEight => rank == '8';
+
+  String disp() =>
+      paint('$rank${suitSymbol(suit)}', isEight: isEight, suit: suit);
+}
+
+class Deck {
+  final _r = Random();
+  final List<Card> _cards = [];
+
+  Deck() {
+    final ranks = [
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '10',
+      'J',
+      'Q',
+      'K',
+      'A',
+    ];
+    for (final suit in Suit.values) {
+      for (final rank in ranks) {
+        _cards.add(Card(rank, suit));
+      }
+    }
+    _cards.shuffle(_r);
+  }
+
+  bool get isEmpty => _cards.isEmpty;
+
+  Card draw() {
+    if (_cards.isEmpty) throw StateError('Baralho vazio!');
+    return _cards.removeLast();
+  }
+
+  void addAllAndShuffle(Iterable<Card> cards) {
+    _cards.addAll(cards);
+    _cards.shuffle(_r);
+  }
+}
+
+class Player {
+  final String name;
+  final List<Card> hand = [];
+  Player(this.name);
+
+  String handDisp() =>
+      '[ ${hand.map((c) => c.disp()).join(' ')} ] (${hand.length})';
+}
+
+class CrazyEights {
+  final List<Player> players = [
+    Player('P1'),
+    Player('P2'),
+    Player('P3'),
+    Player('P4'),
+  ];
+  final Deck deck = Deck();
+  final List<Card> discard = [];
+  final _rng = Random();
+
+  Suit? requiredSuit;
+
+  void dealInitial() {
+    for (var i = 0; i < 5; i++) {
+      for (final p in players) {
+        p.hand.add(deck.draw());
+      }
+    }
+    discard.add(deck.draw());
+    if (discard.last.isEight) {
+      requiredSuit = Suit.values[_rng.nextInt(4)];
+      print(
+        'Primeira carta é 8! Naipe inicial sorteado: 🟩${suitSymbol(requiredSuit!)}',
+      );
+    } else {
+      requiredSuit = null;
+    }
+  }
+
+  Card get top {
+    if (discard.isEmpty) throw StateError('Descarte vazio!');
+    return discard.last;
+  }
+
+  bool isPlayable(Card c) {
+    if (c.isEight) return true;
+    if (requiredSuit != null) return c.suit == requiredSuit;
+    return c.suit == top.suit || c.rank == top.rank;
+  }
+
+  Suit chooseSuitForEight(Player p) {
+    final counts = <Suit, int>{for (var s in Suit.values) s: 0};
+    for (final c in p.hand) {
+      if (!c.isEight) counts[c.suit] = counts[c.suit]! + 1;
+    }
+    final maxCount = counts.values.reduce(max);
+    final bestSuits = counts.entries
+        .where((e) => e.value == maxCount)
+        .map((e) => e.key)
+        .toList();
+    return bestSuits[_rng.nextInt(bestSuits.length)];
+  }
+
+  void refillDeckIfNeeded() {
+    if (deck.isEmpty && discard.length > 1) {
+      final topCard = discard.removeLast();
+      deck.addAllAndShuffle(discard);
+      discard.clear();
+      discard.add(topCard);
+      print('(Baralho reabastecido)');
+    }
+  }
+
+  Card? chooseCardToPlay(Player p) {
+    final playable = p.hand.where(isPlayable).toList();
+    if (playable.isEmpty) return null;
+    final nonEights = playable.where((c) => !c.isEight).toList();
+    if (nonEights.isNotEmpty) return nonEights.first;
+    return playable.first;
+  }
+
+  void run() {
+    dealInitial();
+    printState();
+
+    int turn = 0;
+    int current = 0;
+    const maxTurns = 1000;
+    while (turn < maxTurns) {
+      final p = players[current];
+      print('\nVez de ${p.name}');
+
+      Card? toPlay = chooseCardToPlay(p);
+
+      int draws = 0;
+      while (toPlay == null && !deck.isEmpty && draws < 5) {
+        refillDeckIfNeeded();
+        final drawn = deck.draw();
+        p.hand.add(drawn);
+        print('${p.name} compra uma carta: ${drawn.disp()}');
+        toPlay = isPlayable(drawn) ? drawn : chooseCardToPlay(p);
+        draws++;
+      }
+
+      if (toPlay != null) {
+        p.hand.remove(toPlay);
+        discard.add(toPlay);
+
+        if (toPlay.isEight) {
+          final chosen = chooseSuitForEight(p);
+          requiredSuit = chosen;
+          print(
+            '${p.name} joga ${toPlay.disp()} e declara naipe: 🟩${suitSymbol(chosen)}',
+          );
+        } else {
+          print('${p.name} joga ${toPlay.disp()}');
+          requiredSuit = null;
+        }
+
+        if (p.hand.isEmpty) {
+          printState();
+          print('\n🎉 ${p.name} venceu! 🎉');
+          return;
+        }
+      } else {
+        print('${p.name} não pode jogar nem comprar, passa a vez.');
+      }
+
+      printState();
+      current = (current + 1) % players.length;
+      turn++;
+    }
+    print('\nLimite de turnos atingido! Empate.');
+  }
+
+  void printState() {
+    print('\nEstado atual:');
+    for (final p in players) {
+      print('  ${p.name}: ${p.handDisp()}');
+    }
+    final reqStr = (requiredSuit != null)
+        ? ' (naipe declarado: 🟩${suitSymbol(requiredSuit!)})'
+        : '';
+    print(
+      '  Descarte (topo): ${discard.isNotEmpty ? discard.last.disp() : '<vazio>'}$reqStr',
+    );
+  }
+}
+
+void main() {
+  print('=== Oito Maluco — Exercício (4 jogadores) ===');
+  CrazyEights().run();
+}
